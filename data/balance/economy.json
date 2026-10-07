@@ -1,0 +1,8 @@
+{
+  "_readme": "Economy tunables. Watts are the TIME currency: accrue in real time (hub or away), capped at cap, spent on card upgrades. per_hour=240 -> one watt every 15s (watts bar cycle).",
+  "watts": {
+    "start": 20,
+    "per_hour": 240,
+    "cap": 20
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "_readme": "Rings theme \u2014 concentric prop rings with door gaps around the central spawn. See theme_shop_classic.json for field docs.",
+  "id": "shop_rings",
+  "name": "The Shop \u2014 Winding Workshop",
+  "colors": {
+    "floor": "#414a44",
+    "floor_alt": "#3a423d",
+    "wall": "#5f4a4a",
+    "accent": "#c97f7f"
+  },
+  "props": [
+    {
+      "shape": "mesh",
+      "mesh": "res://assets/models/Box_Pallet_01/SRA_Box_Pallet_01.glb",
+      "size": [
+        0.95,
+        0.46,
+        0.96
+      ],
+      "color": "#8B7355",
+      "weight": 1
+    },
+    {
+      "shape": "mesh",
+      "mesh": "res://assets/models/Box_Pallet_02/SRA_Box_Pallet_02.glb",
+      "size": [
+        0.95,
+        0.46,
+        0.96
+      ],
+      "color": "#8B7355",
+      "weight": 1
+    },
+    {
+      "shape": "mesh",
+      "mesh": "res://assets/models/Box_Pallet_03/SRA_Box_Pallet_03.glb",
+      "size": [
+        0.95,
+        1.02,
+        0.96
+      ],
+      "color": "#8B7355",
+      "weight": 1
+    }
+  ],
+  "generation": {
+    "algorithm": "rings",
+    "arena_size": [
+      44,
+      44
+    ],
+    "prop_density": 0.006,
+    "min_clearance": 3.4,
+    "spawn_clear_radius": 5.0
+  },
+  "spawns": {
+    "shawarma_max": 38,
+    "shawarma_respawn_sec": 1.4,
+    "powerup_interval_sec": [
+      18,
+      34
+    ],
+    "lootbox_chance": 0.2
+  },
+  "order": 3,
+  "textures": {
+    "floor": "res://assets/textures/concrete_floor.jpg",
+    "wall": "res://assets/textures/concrete_block_wall_1k.jpg"
+  }
+}

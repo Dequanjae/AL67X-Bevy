@@ -1,0 +1,38 @@
+{
+  "_readme": "AGENT-ADDABLE audio map. music: key → stream path ('' = not provided yet; plumbing exists so supplying a file is a data edit — e.g. the retro shop theme goes in 'shop'). sfx: event key → stream. taunts_dir is a SHARED random pool any enemy pulls from (no per-enemy assignment). transitions_dir = scene-change stingers (clips longer than transition_max_sec are skipped at load).",
+  "music": {
+    "hub": "res://assets/audio/music/Background.ogg",
+    "gameplay": "res://assets/audio/music/Background.ogg",
+    "death": "res://assets/audio/music/Death.ogg",
+    "credits": "res://assets/audio/music/Credits.ogg",
+    "shop": ""
+  },
+  "sfx": {
+    "enemy_hit": "res://assets/audio/sfx/generated/enemy_hit.ogg",
+    "enemy_die": "res://assets/audio/sfx/generated/enemy_die.ogg",
+    "player_hit": "res://assets/audio/sfx/generated/player_hit.ogg",
+    "blob_hit": "res://assets/audio/sfx/generated/blob_hit.ogg",
+    "eat": "res://assets/audio/sfx/generated/eat.ogg",
+    "ui_tap": "res://assets/audio/sfx/generated/ui_tap.ogg",
+    "ui_confirm": "res://assets/audio/sfx/generated/ui_confirm.ogg",
+    "ui_error": "res://assets/audio/sfx/generated/ui_error.ogg",
+    "level_up": "res://assets/audio/sfx/generated/level_up.ogg",
+    "unlock_sting": "res://assets/audio/sfx/generated/unlock_sting.ogg",
+    "shield_break": "res://assets/audio/sfx/generated/shield_break.ogg",
+    "splash_sting": "res://assets/audio/sfx/generated/splash_sting.ogg"
+  },
+  "taunts_dir": "res://assets/audio/sfx/taunts",
+  "transitions_dir": "res://assets/audio/sfx/transitions",
+  "transition_max_sec": 6.0,
+  "taunt_interval_sec": [
+    8,
+    16
+  ],
+  "taunt_on_kill_chance": 0.06,
+  "volumes_db": {
+    "music": -8.0,
+    "sfx": -1.0,
+    "taunts": -6.0,
+    "transitions": -9.0
+  }
+}

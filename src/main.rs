@@ -214,16 +214,7 @@ struct Player {
 }
 
 #[derive(Component)]
-struct Enemy;
-
-#[derive(Component)]
-struct Projectile;
-
-#[derive(Component)]
-struct EnemyProjectile;
-
-#[derive(Clone)]
-struct EnemyState {
+struct Enemy {
     id: String,
     hp: f32,
     max_hp: f32,
@@ -245,8 +236,8 @@ struct EnemyState {
     boss_telegraph: bool,
 }
 
-#[derive(Clone)]
-struct ProjectileState {
+#[derive(Component)]
+struct Projectile {
     dir: Vec2,
     ttl: f32,
     bounces: i32,
@@ -256,22 +247,13 @@ struct ProjectileState {
     speed: f32,
 }
 
-#[derive(Clone)]
-struct EnemyProjectileState {
+#[derive(Component)]
+struct EnemyProjectile {
     dir: Vec2,
     speed: f32,
     damage: f32,
     ttl: f32,
 }
-
-#[derive(Resource, Default)]
-struct EnemyStates(HashMap<Entity, EnemyState>);
-
-#[derive(Resource, Default)]
-struct ProjectileStates(HashMap<Entity, ProjectileState>);
-
-#[derive(Resource, Default)]
-struct EnemyProjectileStates(HashMap<Entity, EnemyProjectileState>);
 
 #[derive(Component)]
 struct Pickup {
@@ -423,7 +405,9 @@ fn main() {
     let powerup_raw: serde_json::Value = load_json("data/powerups/powerups.json");
     let powerup_defs: Vec<PowerupDef> = serde_json::from_value(powerup_raw["effects"].clone()).unwrap();
 
-    let theme: LevelTheme = load_json("data/levels/theme_shop_classic.json");
+    let theme: LevelTheme = load_json(
+        "data/levels/theme_shop_classic.json",
+    );
 
     let arena_half = Vec2::new(theme.generation.arena_size[0] * 0.5, theme.generation.arena_size[1] * 0.5);
     let survival = survival_seconds(1, &config);
@@ -432,9 +416,6 @@ fn main() {
 
     App::new()
         .add_plugins(DefaultPlugins)
-        .insert_resource(EnemyStates::default())
-        .insert_resource(ProjectileStates::default())
-        .insert_resource(EnemyProjectileStates::default())
         .insert_resource(GameState {
             level: 1,
             time_survived: 0.0,
@@ -472,7 +453,9 @@ fn main() {
             (
                 player_movement,
                 auto_fire,
-                enemy_and_projectile_update,
+                enemy_ai,
+                projectile_update,
+                enemy_projectile_update,
                 pickup_update,
                 xp_and_leveling,
                 boss_logic,
@@ -492,11 +475,30 @@ fn setup(mut commands: Commands, mut state: ResMut<GameState>) {
     commands.spawn(Camera2d);
 
     commands.spawn((
-        Sprite::from_color(
-            Color::srgb(0.3, 0.7, 1.0),
-            Vec2::splat(1.0)),
+        Sprite::from_color(Color::srgb(0.3, 0.7, 1.0), Vec2::splat(1.0)),
         Transform::from_xyz(0.0, 0.0, 0.0),
-        Player,
+        Player {
+            hearts: state.config.player_base.max_hearts,
+            max_hearts: state.config.player_base.max_hearts,
+            shield: 0,
+            speed_mult: 1.0,
+            damage: state.config.player_base.damage,
+            damage_mult: 1.0,
+            fire_interval: state.config.player_base.fire_interval_sec,
+            attack_range: state.config.player_base.attack_range,
+            projectile_count: state.config.player_base.projectile_count,
+            projectile_scale: 1.0,
+            projectile_speed: state.config.player_base.projectile_speed,
+            projectile_bounces: 0,
+            projectile_pierce: 0,
+            orbital_count: 0,
+            nova_interval: 0.0,
+            xp: 0.0,
+            level: 0,
+            fire_timer: 0.0,
+            iframe: 0.0,
+            dead: false,
+        },
     ));
 
     commands.spawn((
@@ -614,15 +616,9 @@ fn auto_fire(
     }
 }
 
-fn enemy_and_projectile_update(
-    mut commands: Commands,
-    enemy_q: Query<(Entity, &Transform), With<Enemy>>,
-    proj_q: Query<(Entity, &Transform), With<Projectile>>,
-    eproj_q: Query<(Entity, &Transform), With<EnemyProjectile>>,
-    mut enemy_states: ResMut<EnemyStates>,
-    mut proj_states: ResMut<ProjectileStates>,
-    mut eproj_states: ResMut<EnemyProjectileStates>,
-    mut player_q: Query<(&Transform, &mut Player)>,
+fn enemy_ai(
+    mut enemy_q: Query<(&mut Transform, &mut Enemy), Without<Player>>,
+    mut player_q: Query<(&Transform, &mut Player), Without<Enemy>>,
     state: Res<GameState>,
     time: Res<Time>,
 ) {
@@ -630,13 +626,8 @@ fn enemy_and_projectile_update(
     let player_pos = Vec2::new(player_transform.translation.x, player_transform.translation.z);
     let delta = time.delta_secs();
 
-    // Enemy AI
-    for (entity, transform) in &enemy_q {
+    for (mut transform, mut enemy) in &mut enemy_q {
         let pos = Vec2::new(transform.translation.x, transform.translation.z);
-        let mut enemy = match enemy_states.0.get(&entity) {
-            Some(e) => e.clone(),
-            None => continue,
-        };
         let mut vel = Vec2::ZERO;
 
         if enemy.is_boss && enemy.boss_dash_time > 0.0 {
@@ -691,8 +682,9 @@ fn enemy_and_projectile_update(
             new_pos.y.clamp(-state.arena_half.y + 0.6, state.arena_half.y - 0.6),
         );
 
+        transform.translation.x = clamped.x;
+        transform.translation.z = clamped.y;
         enemy.flash = (enemy.flash - delta * 5.0).max(0.0);
-        enemy_states.0.insert(entity, enemy);
 
         if !player.dead && player.iframe <= 0.0 && clamped.distance(player_pos) < enemy.radius + 0.5 {
             if player.shield > 0 {
@@ -706,22 +698,26 @@ fn enemy_and_projectile_update(
             }
         }
     }
+}
 
-    // Projectile update
+fn projectile_update(
+    mut commands: Commands,
+    mut proj_q: Query<(Entity, &mut Transform, &mut Projectile), Without<Enemy>>,
+    mut enemy_q: Query<(Entity, &mut Transform, &mut Enemy), Without<Projectile>>,
+    state: Res<GameState>,
+    time: Res<Time>,
+) {
+    let delta = time.delta_secs();
     let mut to_despawn = Vec::new();
-    for (entity, transform) in &proj_q {
-        let pos = Vec2::new(transform.translation.x, transform.translation.z);
-        let mut proj = match proj_states.0.get(&entity) {
-            Some(p) => p.clone(),
-            None => continue,
-        };
 
+    for (entity, mut transform, mut proj) in &mut proj_q {
         proj.ttl -= delta;
         if proj.ttl <= 0.0 {
             to_despawn.push(entity);
             continue;
         }
 
+        let pos = Vec2::new(transform.translation.x, transform.translation.z);
         let new_pos = pos + proj.dir * proj.speed * delta;
 
         let mut hit_wall = false;
@@ -750,62 +746,55 @@ fn enemy_and_projectile_update(
             }
         }
 
-        proj_states.0.insert(entity, proj);
-    }
+        transform.translation.x = new_pos.x;
+        transform.translation.z = new_pos.y;
 
-    // Projectile-enemy collision
-    {
-        let mut proj_data: Vec<(Entity, Vec2, f32, f32)> = Vec::new();
-        for (entity, proj) in &proj_states.0 {
-            let transform = proj_q.get(*entity).unwrap().1;
-            proj_data.push((*entity, Vec2::new(transform.translation.x, transform.translation.z), proj.radius, proj.damage));
-        }
-
-        let mut collision_despawn = Vec::new();
-        for (proj_entity, pos, radius, damage) in &proj_data {
-            for (enemy_entity, enemy) in &enemy_states.0 {
-                let enemy_transform = enemy_q.get(*enemy_entity).unwrap().1;
-                let enemy_pos = Vec2::new(enemy_transform.translation.x, enemy_transform.translation.z);
-                if pos.distance(enemy_pos) < enemy.radius + radius {
-                    if let Some(e) = enemy_states.0.get_mut(enemy_entity) {
-                        e.hp -= damage;
-                        e.flash = 1.0;
-                        if e.hp <= 0.0 {
-                            commands.entity(*enemy_entity).despawn();
-                            enemy_states.0.remove(enemy_entity);
-                        }
-                    }
-                    collision_despawn.push(*proj_entity);
-                    break;
+        let mut hit = false;
+        for (enemy_entity, mut enemy_transform, mut enemy) in &mut enemy_q {
+            let enemy_pos = Vec2::new(enemy_transform.translation.x, enemy_transform.translation.z);
+            if new_pos.distance(enemy_pos) < enemy.radius + proj.radius {
+                enemy.hp -= proj.damage;
+                enemy.flash = 1.0;
+                hit = true;
+                if enemy.hp <= 0.0 {
+                    commands.entity(enemy_entity).despawn();
                 }
+                break;
             }
         }
-        for entity in collision_despawn {
-            commands.entity(entity).despawn();
-            proj_states.0.remove(&entity);
+
+        if hit {
+            if proj.pierce > 0 {
+                proj.pierce -= 1;
+            } else {
+                to_despawn.push(entity);
+            }
         }
     }
 
     for entity in to_despawn {
         commands.entity(entity).despawn();
-        proj_states.0.remove(&entity);
     }
+}
 
-    // Enemy projectile update
-    let mut eproj_to_despawn = Vec::new();
-    for (entity, transform) in &eproj_q {
-        let pos = Vec2::new(transform.translation.x, transform.translation.z);
-        let mut proj = match eproj_states.0.get(&entity) {
-            Some(p) => p.clone(),
-            None => continue,
-        };
+fn enemy_projectile_update(
+    mut commands: Commands,
+    mut proj_q: Query<(Entity, &mut Transform, &mut EnemyProjectile), Without<Player>>,
+    mut player_q: Query<(&Transform, &mut Player), Without<EnemyProjectile>>,
+    state: Res<GameState>,
+    time: Res<Time>,
+) {
+    let delta = time.delta_secs();
+    let mut to_despawn = Vec::new();
 
+    for (entity, mut transform, mut proj) in &mut proj_q {
         proj.ttl -= delta;
         if proj.ttl <= 0.0 {
-            eproj_to_despawn.push(entity);
+            to_despawn.push(entity);
             continue;
         }
 
+        let pos = Vec2::new(transform.translation.x, transform.translation.z);
         let new_pos = pos + proj.dir * proj.speed * delta;
 
         if new_pos.x < -state.arena_half.x + 0.3
@@ -813,10 +802,15 @@ fn enemy_and_projectile_update(
             || new_pos.y < -state.arena_half.y + 0.3
             || new_pos.y > state.arena_half.y - 0.3
         {
-            eproj_to_despawn.push(entity);
+            to_despawn.push(entity);
             continue;
         }
 
+        transform.translation.x = new_pos.x;
+        transform.translation.z = new_pos.y;
+
+        let (player_transform, mut player) = player_q.single_mut().unwrap();
+        let player_pos = Vec2::new(player_transform.translation.x, player_transform.translation.z);
         if new_pos.distance(player_pos) < 0.3 + 0.45 {
             if player.iframe <= 0.0 {
                 if player.shield > 0 {
@@ -829,15 +823,12 @@ fn enemy_and_projectile_update(
                     player.dead = true;
                 }
             }
-            eproj_to_despawn.push(entity);
-        } else {
-            eproj_states.0.insert(entity, proj);
+            to_despawn.push(entity);
         }
     }
 
-    for entity in eproj_to_despawn {
+    for entity in to_despawn {
         commands.entity(entity).despawn();
-        eproj_states.0.remove(&entity);
     }
 }
 
@@ -952,7 +943,6 @@ fn xp_and_leveling(
 fn boss_logic(
     mut commands: Commands,
     mut state: ResMut<GameState>,
-    mut enemy_q: Query<(&mut Transform, &mut Enemy)>,
     player_q: Query<(&Transform, &Player)>,
     time: Res<Time>,
 ) {

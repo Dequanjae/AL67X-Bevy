@@ -1,0 +1,13 @@
+{
+  "_readme": "AGENT-ADDABLE loot box. drops = rarity pools with EXPLICIT weight odds (store compliance: these are the displayed drop rates). cost.currency: 'blobs', 'tokens' or 'watts'. art_rarity picks the Motor-box sprite sheet folder shown in the shop + reveal popup. rewards = granted when the box is OPENED: cards rolled from the drop table plus flat currency bonuses.",
+  "id": "basic_box",
+  "name": "Basic Loot Box",
+  "art_rarity": "common",
+  "cost": { "currency": "blobs", "amount": 100 },
+  "rewards": { "cards": 2, "blobs": 40, "tokens": 2 },
+  "drops": [
+    { "rarity": "common", "weight": 70 },
+    { "rarity": "rare", "weight": 25 },
+    { "rarity": "epic", "weight": 5 }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "_readme": "AGENT-ADDABLE level theme. Levels cycle through theme files in data/levels/ (sorted by filename); generation params scale with level number in code. To add a theme: drop a new theme_*.json here \u2014 no code changes. algorithm is one of: scatter | aisles | rings | clusters | rooms (new algorithms require code \u2014 flagged exception). Colors are hex. min_clearance is the guaranteed dodge corridor width in meters \u2014 do not set below 2.5. 'order' sets the level rotation position (level 1 = lowest order \u2014 keep it the easiest, it's the tutorial hook).",
+  "id": "shop_classic",
+  "name": "The Shop \u2014 Classic Floor",
+  "colors": {
+    "floor": "#4a4f57",
+    "floor_alt": "#42464e",
+    "wall": "#6b5a45",
+    "accent": "#c9a86a"
+  },
+  "props": [
+    {
+      "shape": "mesh",
+      "mesh": "res://assets/models/Box_Pallet_01/SRA_Box_Pallet_01.glb",
+      "size": [
+        0.95,
+        0.46,
+        0.96
+      ],
+      "color": "#8B7355",
+      "weight": 1
+    },
+    {
+      "shape": "mesh",
+      "mesh": "res://assets/models/Box_Pallet_02/SRA_Box_Pallet_02.glb",
+      "size": [
+        0.95,
+        0.46,
+        0.96
+      ],
+      "color": "#8B7355",
+      "weight": 1
+    },
+    {
+      "shape": "mesh",
+      "mesh": "res://assets/models/Box_Pallet_03/SRA_Box_Pallet_03.glb",
+      "size": [
+        0.95,
+        1.02,
+        0.96
+      ],
+      "color": "#8B7355",
+      "weight": 1
+    }
+  ],
+  "generation": {
+    "algorithm": "scatter",
+    "arena_size": [
+      42,
+      42
+    ],
+    "prop_density": 0.006,
+    "min_clearance": 3.2,
+    "spawn_clear_radius": 4.5
+  },
+  "spawns": {
+    "shawarma_max": 38,
+    "shawarma_respawn_sec": 1.4,
+    "powerup_interval_sec": [
+      18,
+      32
+    ],
+    "lootbox_chance": 0.18
+  },
+  "order": 1,
+  "textures": {
+    "floor": "res://assets/textures/concrete_floor.jpg",
+    "wall": "res://assets/textures/concrete_block_wall_1k.jpg"
+  }
+}
