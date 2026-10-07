@@ -274,6 +274,9 @@ struct DamageNumber {
     velocity: Vec3,
 }
 
+#[derive(Component)]
+struct Hud;
+
 // ── Resources ────────────────────────────────────────────────────────────────
 
 #[derive(Resource)]
@@ -295,6 +298,10 @@ struct GameState {
     orbital_angle: f32,
     orbital_hit_timer: f32,
     nova_timer: f32,
+    shawarma_xp_mult: f32,
+    shawarma_spawn_bonus: i32,
+    powerup_spawn_bonus: i32,
+    powerup_rate_mult: f32,
     timed_boosts: Vec<TimedBoost>,
     level_up_pending: bool,
     level_up_options: Vec<CardDef>,
@@ -369,7 +376,9 @@ fn main() {
     for entry in enemy_dir {
         let path = entry.unwrap().path();
         if path.extension().map(|e| e == "json").unwrap_or(false) {
-            if let Ok(def) = serde_json::from_str::<EnemyDef>(&std::fs::read_to_string(&path).unwrap()) {
+            if let Ok(def) =
+                serde_json::from_str::<EnemyDef>(&std::fs::read_to_string(&path).unwrap())
+            {
                 all_enemies.push(def);
             }
         }
@@ -380,7 +389,9 @@ fn main() {
     for entry in boss_dir {
         let path = entry.unwrap().path();
         if path.extension().map(|e| e == "json").unwrap_or(false) {
-            if let Ok(def) = serde_json::from_str::<BossDef>(&std::fs::read_to_string(&path).unwrap()) {
+            if let Ok(def) =
+                serde_json::from_str::<BossDef>(&std::fs::read_to_string(&path).unwrap())
+            {
                 all_bosses.push(def);
             }
         }
@@ -394,7 +405,9 @@ fn main() {
             for entry in dir {
                 let path = entry.unwrap().path();
                 if path.extension().map(|e| e == "json").unwrap_or(false) {
-                    if let Ok(def) = serde_json::from_str::<CardDef>(&std::fs::read_to_string(&path).unwrap()) {
+                    if let Ok(def) =
+                        serde_json::from_str::<CardDef>(&std::fs::read_to_string(&path).unwrap())
+                    {
                         all_cards.push(def);
                     }
                 }
@@ -403,13 +416,15 @@ fn main() {
     }
 
     let powerup_raw: serde_json::Value = load_json("data/powerups/powerups.json");
-    let powerup_defs: Vec<PowerupDef> = serde_json::from_value(powerup_raw["effects"].clone()).unwrap();
+    let powerup_defs: Vec<PowerupDef> =
+        serde_json::from_value(powerup_raw["effects"].clone()).unwrap();
 
-    let theme: LevelTheme = load_json(
-        "data/levels/theme_shop_classic.json",
+    let theme: LevelTheme = load_json("data/levels/theme_shop_classic.json");
+
+    let arena_half = Vec2::new(
+        theme.generation.arena_size[0] * 0.5,
+        theme.generation.arena_size[1] * 0.5,
     );
-
-    let arena_half = Vec2::new(theme.generation.arena_size[0] * 0.5, theme.generation.arena_size[1] * 0.5);
     let survival = survival_seconds(1, &config);
 
     let mut rng = StdRng::seed_from_u64(42);
@@ -434,6 +449,10 @@ fn main() {
             orbital_angle: 0.0,
             orbital_hit_timer: 0.0,
             nova_timer: 0.0,
+            shawarma_xp_mult: 1.0,
+            shawarma_spawn_bonus: 0,
+            powerup_spawn_bonus: 0,
+            powerup_rate_mult: 1.0,
             timed_boosts: Vec::new(),
             level_up_pending: false,
             level_up_options: Vec::new(),
@@ -453,6 +472,7 @@ fn main() {
             (
                 player_movement,
                 auto_fire,
+                enemy_spawn,
                 enemy_ai,
                 projectile_update,
                 enemy_projectile_update,
@@ -466,13 +486,36 @@ fn main() {
                 timed_boosts_tick,
                 damage_numbers_update,
                 camera_follow,
+                card_select,
+                hud_update,
             ),
         )
         .run();
 }
 
 fn setup(mut commands: Commands, mut state: ResMut<GameState>) {
-    commands.spawn(Camera2d);
+    commands.spawn((
+        Camera2d,
+        Projection::Orthographic(OrthographicProjection {
+            scale: 0.08,
+            ..OrthographicProjection::default_2d()
+        }),
+    ));
+    commands.spawn((
+        Text::new("AL67X  |  WASD / arrows to move"),
+        TextFont {
+            font_size: 22.0.into(),
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(16),
+            left: px(16),
+            ..default()
+        },
+        Hud,
+    ));
 
     commands.spawn((
         Sprite::from_color(Color::srgb(0.3, 0.7, 1.0), Vec2::splat(1.0)),
@@ -504,24 +547,35 @@ fn setup(mut commands: Commands, mut state: ResMut<GameState>) {
     commands.spawn((
         Sprite::from_color(
             Color::srgb(0.29, 0.31, 0.34),
-            Vec2::splat(state.arena_half.x * 2.0),
+            Vec2::new(state.arena_half.x * 2.0, state.arena_half.y * 2.0),
         ),
-        Transform::from_xyz(0.0, -0.1, 0.0),
+        Transform::from_xyz(0.0, 0.0, -0.1),
     ));
 
     let wall_color = Color::srgb(0.42, 0.35, 0.27);
     let wall_thickness = 1.0;
-    let wall_height = 2.2;
     let half = state.arena_half;
     for (pos, size) in [
-        (Vec3::new(0.0, wall_height * 0.5, -half.y - wall_thickness * 0.5), Vec3::new(half.x * 2.0 + wall_thickness * 2.0, wall_height, wall_thickness)),
-        (Vec3::new(0.0, wall_height * 0.5, half.y + wall_thickness * 0.5), Vec3::new(half.x * 2.0 + wall_thickness * 2.0, wall_height, wall_thickness)),
-        (Vec3::new(-half.x - wall_thickness * 0.5, wall_height * 0.5, 0.0), Vec3::new(wall_thickness, wall_height, half.y * 2.0)),
-        (Vec3::new(half.x + wall_thickness * 0.5, wall_height * 0.5, 0.0), Vec3::new(wall_thickness, wall_height, half.y * 2.0)),
+        (
+            Vec2::new(0.0, -half.y - wall_thickness * 0.5),
+            Vec2::new(half.x * 2.0, wall_thickness),
+        ),
+        (
+            Vec2::new(0.0, half.y + wall_thickness * 0.5),
+            Vec2::new(half.x * 2.0, wall_thickness),
+        ),
+        (
+            Vec2::new(-half.x - wall_thickness * 0.5, 0.0),
+            Vec2::new(wall_thickness, half.y * 2.0),
+        ),
+        (
+            Vec2::new(half.x + wall_thickness * 0.5, 0.0),
+            Vec2::new(wall_thickness, half.y * 2.0),
+        ),
     ] {
         commands.spawn((
-            Sprite::from_color(wall_color, Vec2::new(size.x, size.z)),
-            Transform::from_xyz(pos.x, pos.y, pos.z),
+            Sprite::from_color(wall_color, size),
+            Transform::from_xyz(pos.x, pos.y, 0.2),
         ));
     }
 
@@ -535,6 +589,7 @@ fn setup(mut commands: Commands, mut state: ResMut<GameState>) {
 fn player_movement(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut query: Query<(&mut Transform, &mut Player)>,
+    state: Res<GameState>,
     time: Res<Time>,
 ) {
     let (mut transform, mut player) = query.single_mut().unwrap();
@@ -560,8 +615,16 @@ fn player_movement(
         dir = dir.normalize();
         let speed = 7.0 * player.speed_mult;
         transform.translation.x += dir.x * speed * time.delta_secs();
-        transform.translation.z += dir.y * speed * time.delta_secs();
+        transform.translation.y += dir.y * speed * time.delta_secs();
     }
+    transform.translation.x = transform
+        .translation
+        .x
+        .clamp(-state.arena_half.x + 0.5, state.arena_half.x - 0.5);
+    transform.translation.y = transform
+        .translation
+        .y
+        .clamp(-state.arena_half.y + 0.5, state.arena_half.y - 0.5);
 
     player.fire_timer -= time.delta_secs();
     player.iframe -= time.delta_secs();
@@ -578,11 +641,14 @@ fn auto_fire(
         return;
     }
 
-    let player_pos = Vec2::new(player_transform.translation.x, player_transform.translation.z);
+    let player_pos = Vec2::new(
+        player_transform.translation.x,
+        player_transform.translation.y,
+    );
 
     let mut nearest: Option<(Vec2, f32)> = None;
     for (transform, enemy) in &enemy_q {
-        let pos = Vec2::new(transform.translation.x, transform.translation.z);
+        let pos = Vec2::new(transform.translation.x, transform.translation.y);
         let dist = pos.distance(player_pos);
         if dist < player.attack_range {
             if nearest.is_none() || dist < nearest.unwrap().1 {
@@ -601,7 +667,7 @@ fn auto_fire(
             let dir = Vec2::from_angle(angle + spread);
             commands.spawn((
                 Sprite::from_color(Color::srgb(0.95, 1.0, 0.98), Vec2::splat(0.55)),
-                Transform::from_xyz(player_pos.x, 0.8, player_pos.y),
+                Transform::from_xyz(player_pos.x, player_pos.y, 0.8),
                 Projectile {
                     dir,
                     ttl: 2.0,
@@ -616,6 +682,91 @@ fn auto_fire(
     }
 }
 
+fn enemy_spawn(
+    mut commands: Commands,
+    mut state: ResMut<GameState>,
+    player_q: Query<&Transform, With<Player>>,
+    time: Res<Time>,
+) {
+    if state.ended || state.level_up_pending || state.enemy_defs.is_empty() {
+        return;
+    }
+    state.spawn_timer -= time.delta_secs();
+    if state.spawn_timer > 0.0 {
+        return;
+    }
+
+    state.spawn_timer = spawn_interval(state.level, state.time_survived, &state.config);
+    let candidates: Vec<_> = state
+        .enemy_defs
+        .iter()
+        .filter(|enemy| enemy.min_level <= state.level)
+        .cloned()
+        .collect();
+    if candidates.is_empty() {
+        return;
+    }
+    let total_weight: f32 = candidates.iter().map(|enemy| enemy.weight).sum();
+    let player_transform = player_q.single().unwrap();
+    let player_pos = Vec2::new(
+        player_transform.translation.x,
+        player_transform.translation.y,
+    );
+    let half = state.arena_half;
+    let batch = spawn_batch(state.level, state.time_survived, &state.config);
+
+    for _ in 0..batch {
+        let roll = state.rng.r#gen::<f32>() * total_weight;
+        let mut sum = 0.0;
+        let mut selected = &candidates[0];
+        for candidate in &candidates {
+            sum += candidate.weight;
+            if roll <= sum {
+                selected = candidate;
+                break;
+            }
+        }
+
+        let side = state.rng.r#gen_range(0..4);
+        let along = state.rng.r#gen_range(-0.85_f32..0.85_f32);
+        let pos = match side {
+            0 => Vec2::new(-half.x + 0.8, along * half.y),
+            1 => Vec2::new(half.x - 0.8, along * half.y),
+            2 => Vec2::new(along * half.x, -half.y + 0.8),
+            _ => Vec2::new(along * half.x, half.y - 0.8),
+        };
+        if pos.distance(player_pos) < state.theme.generation.spawn_clear_radius {
+            continue;
+        }
+        let def = selected.clone();
+        commands.spawn((
+            Sprite::from_color(Color::srgb(0.86, 0.24, 0.31), Vec2::splat(def.size_m)),
+            Transform::from_xyz(pos.x, pos.y, 0.5),
+            Enemy {
+                id: def.id,
+                hp: def.hp,
+                max_hp: def.hp,
+                speed: def.speed,
+                damage: def.damage,
+                radius: def.radius,
+                xp: def.xp,
+                behavior: def.behavior,
+                bmode: 0,
+                btimer: 0.0,
+                bdir: Vec2::ZERO,
+                flash: 0.0,
+                is_boss: false,
+                boss_id: String::new(),
+                boss_patterns: Vec::new(),
+                boss_dash_dir: Vec2::ZERO,
+                boss_dash_speed: 0.0,
+                boss_dash_time: 0.0,
+                boss_telegraph: false,
+            },
+        ));
+    }
+}
+
 fn enemy_ai(
     mut enemy_q: Query<(&mut Transform, &mut Enemy), Without<Player>>,
     mut player_q: Query<(&Transform, &mut Player), Without<Enemy>>,
@@ -623,11 +774,14 @@ fn enemy_ai(
     time: Res<Time>,
 ) {
     let (player_transform, mut player) = player_q.single_mut().unwrap();
-    let player_pos = Vec2::new(player_transform.translation.x, player_transform.translation.z);
+    let player_pos = Vec2::new(
+        player_transform.translation.x,
+        player_transform.translation.y,
+    );
     let delta = time.delta_secs();
 
     for (mut transform, mut enemy) in &mut enemy_q {
-        let pos = Vec2::new(transform.translation.x, transform.translation.z);
+        let pos = Vec2::new(transform.translation.x, transform.translation.y);
         let mut vel = Vec2::ZERO;
 
         if enemy.is_boss && enemy.boss_dash_time > 0.0 {
@@ -678,15 +832,20 @@ fn enemy_ai(
 
         let new_pos = pos + vel * delta;
         let clamped = Vec2::new(
-            new_pos.x.clamp(-state.arena_half.x + 0.6, state.arena_half.x - 0.6),
-            new_pos.y.clamp(-state.arena_half.y + 0.6, state.arena_half.y - 0.6),
+            new_pos
+                .x
+                .clamp(-state.arena_half.x + 0.6, state.arena_half.x - 0.6),
+            new_pos
+                .y
+                .clamp(-state.arena_half.y + 0.6, state.arena_half.y - 0.6),
         );
 
         transform.translation.x = clamped.x;
-        transform.translation.z = clamped.y;
+        transform.translation.y = clamped.y;
         enemy.flash = (enemy.flash - delta * 5.0).max(0.0);
 
-        if !player.dead && player.iframe <= 0.0 && clamped.distance(player_pos) < enemy.radius + 0.5 {
+        if !player.dead && player.iframe <= 0.0 && clamped.distance(player_pos) < enemy.radius + 0.5
+        {
             if player.shield > 0 {
                 player.shield -= 1;
             } else {
@@ -717,7 +876,7 @@ fn projectile_update(
             continue;
         }
 
-        let pos = Vec2::new(transform.translation.x, transform.translation.z);
+        let pos = Vec2::new(transform.translation.x, transform.translation.y);
         let new_pos = pos + proj.dir * proj.speed * delta;
 
         let mut hit_wall = false;
@@ -747,16 +906,24 @@ fn projectile_update(
         }
 
         transform.translation.x = new_pos.x;
-        transform.translation.z = new_pos.y;
+        transform.translation.y = new_pos.y;
 
         let mut hit = false;
         for (enemy_entity, mut enemy_transform, mut enemy) in &mut enemy_q {
-            let enemy_pos = Vec2::new(enemy_transform.translation.x, enemy_transform.translation.z);
+            let enemy_pos = Vec2::new(enemy_transform.translation.x, enemy_transform.translation.y);
             if new_pos.distance(enemy_pos) < enemy.radius + proj.radius {
                 enemy.hp -= proj.damage;
                 enemy.flash = 1.0;
                 hit = true;
                 if enemy.hp <= 0.0 {
+                    commands.spawn((
+                        Sprite::from_color(Color::srgb(0.3, 0.95, 0.55), Vec2::splat(0.38)),
+                        Transform::from_xyz(enemy_pos.x, enemy_pos.y, 0.4),
+                        Pickup {
+                            kind: PickupKind::Shawarma,
+                            payload: (enemy.xp * state.shawarma_xp_mult).to_string(),
+                        },
+                    ));
                     commands.entity(enemy_entity).despawn();
                 }
                 break;
@@ -794,7 +961,7 @@ fn enemy_projectile_update(
             continue;
         }
 
-        let pos = Vec2::new(transform.translation.x, transform.translation.z);
+        let pos = Vec2::new(transform.translation.x, transform.translation.y);
         let new_pos = pos + proj.dir * proj.speed * delta;
 
         if new_pos.x < -state.arena_half.x + 0.3
@@ -807,10 +974,13 @@ fn enemy_projectile_update(
         }
 
         transform.translation.x = new_pos.x;
-        transform.translation.z = new_pos.y;
+        transform.translation.y = new_pos.y;
 
         let (player_transform, mut player) = player_q.single_mut().unwrap();
-        let player_pos = Vec2::new(player_transform.translation.x, player_transform.translation.z);
+        let player_pos = Vec2::new(
+            player_transform.translation.x,
+            player_transform.translation.y,
+        );
         if new_pos.distance(player_pos) < 0.3 + 0.45 {
             if player.iframe <= 0.0 {
                 if player.shield > 0 {
@@ -839,17 +1009,20 @@ fn pickup_update(
     mut state: ResMut<GameState>,
 ) {
     let (player_transform, mut player) = player_q.single_mut().unwrap();
-    let player_pos = Vec2::new(player_transform.translation.x, player_transform.translation.z);
+    let player_pos = Vec2::new(
+        player_transform.translation.x,
+        player_transform.translation.y,
+    );
     let powerup_defs = state.powerup_defs.clone();
-    let blob_xp = state.config.player_xp.blob_xp_value;
+    let blob_xp = state.config.player_xp.blob_xp_value * state.shawarma_xp_mult;
 
     for (entity, transform, pickup) in &pickup_q {
-        let pos = Vec2::new(transform.translation.x, transform.translation.z);
+        let pos = Vec2::new(transform.translation.x, transform.translation.y);
         if pos.distance(player_pos) < 1.0 {
             match pickup.kind {
                 PickupKind::Shawarma => {
                     state.run_blobs += 1;
-                    player.xp += blob_xp;
+                    player.xp += pickup.payload.parse::<f32>().unwrap_or(blob_xp);
                 }
                 PickupKind::Powerup => {
                     if let Some(def) = powerup_defs.iter().find(|p| p.id == pickup.payload) {
@@ -898,12 +1071,9 @@ fn apply_powerup(player: &mut Player, def: &PowerupDef, state: &mut GameState) {
     }
 }
 
-fn xp_and_leveling(
-    mut player_q: Query<&mut Player>,
-    mut state: ResMut<GameState>,
-) {
+fn xp_and_leveling(mut player_q: Query<&mut Player>, mut state: ResMut<GameState>) {
     let mut player = player_q.single_mut().unwrap();
-    if player.dead {
+    if player.dead || state.level_up_pending {
         return;
     }
 
@@ -940,6 +1110,98 @@ fn xp_and_leveling(
     }
 }
 
+fn card_select(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<GameState>,
+    mut player_q: Query<&mut Player>,
+) {
+    if !state.level_up_pending {
+        return;
+    }
+    let choice = if keyboard.just_pressed(KeyCode::Digit1) {
+        Some(0)
+    } else if keyboard.just_pressed(KeyCode::Digit2) {
+        Some(1)
+    } else if keyboard.just_pressed(KeyCode::Digit3) {
+        Some(2)
+    } else {
+        None
+    };
+    let Some(index) = choice else {
+        return;
+    };
+    let Some(card) = state.level_up_options.get(index).cloned() else {
+        return;
+    };
+    let Ok(mut player) = player_q.single_mut() else {
+        return;
+    };
+    let value = card.effect.value;
+    match card.effect.r#type.as_str() {
+        "heart_add" => {
+            player.max_hearts += value as i32;
+            player.hearts += value as i32;
+        }
+        "shield_add" => player.shield += value as i32,
+        "projectile_add" => player.projectile_count += value as i32,
+        "projectile_scale_mult" => player.projectile_scale *= value,
+        "projectile_bounce_add" => player.projectile_bounces += value as i32,
+        "pierce_add" => player.projectile_pierce += value as i32,
+        "damage_mult" => player.damage_mult *= value,
+        "fire_rate_mult" => player.fire_interval /= value.max(0.1),
+        "speed_mult" => player.speed_mult *= value,
+        "nova_add" => {
+            player.nova_interval = if player.nova_interval == 0.0 {
+                value
+            } else {
+                player.nova_interval.min(value)
+            }
+        }
+        "orbital_add" => player.orbital_count += value as i32,
+        "shawarma_xp_mult" => state.shawarma_xp_mult *= value,
+        "shawarma_max_add" => state.shawarma_spawn_bonus += value as i32,
+        "powerup_count_add" => state.powerup_spawn_bonus += value as i32,
+        "powerup_rate_mult" => state.powerup_rate_mult *= value,
+        _ => {}
+    }
+    state.owned_cards.push(card.id);
+    state.level_up_pending = false;
+    state.level_up_options.clear();
+}
+
+fn hud_update(
+    mut hud_q: Query<&mut Text, With<Hud>>,
+    player_q: Query<&Player>,
+    enemy_q: Query<(), With<Enemy>>,
+    state: Res<GameState>,
+) {
+    let (Ok(mut text), Ok(player)) = (hud_q.single_mut(), player_q.single()) else {
+        return;
+    };
+    let remaining = state.survival_remaining.max(0.0) as i32;
+    let mut display = format!(
+        "Level {}  Hearts {}/{}  Enemies {}  Time {}s",
+        player.level,
+        player.hearts,
+        player.max_hearts,
+        enemy_q.iter().count(),
+        remaining
+    );
+    if state.level_up_pending {
+        display.push_str("\nLEVEL UP — choose with 1, 2, or 3:");
+        for (index, card) in state.level_up_options.iter().enumerate() {
+            display.push_str(&format!("\n{}: {}", index + 1, card.name));
+        }
+    } else {
+        let needed = xp_threshold(player.level, &state.config);
+        display.push_str(&format!(
+            "\nXP {:.0}/{:.0}  WASD / arrows move",
+            player.xp, needed
+        ));
+    }
+    **text = display;
+}
+
 fn boss_logic(
     mut commands: Commands,
     mut state: ResMut<GameState>,
@@ -964,7 +1226,10 @@ fn boss_logic(
         if state.boss_warning_timer <= 0.0 && !state.boss_spawned {
             state.boss_spawned = true;
             let (player_transform, _) = player_q.single().unwrap();
-            let player_pos = Vec2::new(player_transform.translation.x, player_transform.translation.z);
+            let player_pos = Vec2::new(
+                player_transform.translation.x,
+                player_transform.translation.y,
+            );
 
             let boss_index = ((state.level - 1) as usize) % state.boss_defs.len().max(1);
             let boss_def = &state.boss_defs[boss_index];
@@ -1007,7 +1272,7 @@ fn boss_logic(
                     Color::srgb(1.0, 0.3, 0.3),
                     Vec2::splat(base_enemy.size_m * state.config.boss.scale),
                 ),
-                Transform::from_xyz(spawn_pos.x, 0.5, spawn_pos.y),
+                Transform::from_xyz(spawn_pos.x, spawn_pos.y, 0.5),
                 Enemy {
                     id: base_enemy.id.clone(),
                     hp,
@@ -1034,11 +1299,7 @@ fn boss_logic(
     }
 }
 
-fn powerup_spawn(
-    mut commands: Commands,
-    mut state: ResMut<GameState>,
-    time: Res<Time>,
-) {
+fn powerup_spawn(mut commands: Commands, mut state: ResMut<GameState>, time: Res<Time>) {
     if state.ended {
         return;
     }
@@ -1046,7 +1307,8 @@ fn powerup_spawn(
     state.powerup_timer -= delta;
     if state.powerup_timer <= 0.0 {
         let interval = state.theme.spawns.powerup_interval_sec;
-        state.powerup_timer = state.rng.r#gen_range(interval[0]..interval[1]);
+        state.powerup_timer =
+            state.rng.r#gen_range(interval[0]..interval[1]) / state.powerup_rate_mult.max(0.1);
 
         let total: f32 = state.powerup_defs.iter().map(|p| p.weight).sum();
         let roll = state.rng.r#gen::<f32>() * total;
@@ -1061,27 +1323,25 @@ fn powerup_spawn(
         }
         if let Some(id) = chosen {
             let half = state.arena_half;
-            let pos = Vec2::new(
-                state.rng.r#gen_range(-half.x + 2.0..half.x - 2.0),
-                state.rng.r#gen_range(-half.y + 2.0..half.y - 2.0),
-            );
-            commands.spawn((
-                Sprite::from_color(Color::srgb(1.0, 0.8, 0.2), Vec2::splat(0.65)),
-                Transform::from_xyz(pos.x, 0.65, pos.y),
-                Pickup {
-                    kind: PickupKind::Powerup,
-                    payload: id,
-                },
-            ));
+            for _ in 0..=state.powerup_spawn_bonus {
+                let pos = Vec2::new(
+                    state.rng.r#gen_range(-half.x + 2.0..half.x - 2.0),
+                    state.rng.r#gen_range(-half.y + 2.0..half.y - 2.0),
+                );
+                commands.spawn((
+                    Sprite::from_color(Color::srgb(1.0, 0.8, 0.2), Vec2::splat(0.65)),
+                    Transform::from_xyz(pos.x, pos.y, 0.65),
+                    Pickup {
+                        kind: PickupKind::Powerup,
+                        payload: id.clone(),
+                    },
+                ));
+            }
         }
     }
 }
 
-fn shawarma_spawn(
-    mut commands: Commands,
-    mut state: ResMut<GameState>,
-    time: Res<Time>,
-) {
+fn shawarma_spawn(mut commands: Commands, mut state: ResMut<GameState>, time: Res<Time>) {
     if state.ended {
         return;
     }
@@ -1089,7 +1349,9 @@ fn shawarma_spawn(
     state.shawarma_respawn_timer -= delta;
     if state.shawarma_respawn_timer <= 0.0 {
         state.shawarma_respawn_timer = state.theme.spawns.shawarma_respawn_sec;
-        spawn_shawarma(&mut commands, &mut state);
+        for _ in 0..=state.shawarma_spawn_bonus {
+            spawn_shawarma(&mut commands, &mut state);
+        }
     }
 }
 
@@ -1101,7 +1363,7 @@ fn spawn_shawarma(commands: &mut Commands, state: &mut GameState) {
     );
     commands.spawn((
         Sprite::from_color(Color::srgb(0.9, 0.7, 0.3), Vec2::splat(0.5)),
-        Transform::from_xyz(pos.x, 0.5, pos.y),
+        Transform::from_xyz(pos.x, pos.y, 0.5),
         Pickup {
             kind: PickupKind::Shawarma,
             payload: String::new(),
@@ -1116,7 +1378,10 @@ fn orbital_update(
 ) {
     let delta = time.delta_secs();
     let (player_transform, player) = player_q.single().unwrap();
-    let player_pos = Vec2::new(player_transform.translation.x, player_transform.translation.z);
+    let player_pos = Vec2::new(
+        player_transform.translation.x,
+        player_transform.translation.y,
+    );
 
     state.orbital_angle += delta * 2.4;
     state.orbital_hit_timer -= delta;
@@ -1139,7 +1404,10 @@ fn nova_update(
 ) {
     let delta = time.delta_secs();
     let (player_transform, player) = player_q.single().unwrap();
-    let player_pos = Vec2::new(player_transform.translation.x, player_transform.translation.z);
+    let player_pos = Vec2::new(
+        player_transform.translation.x,
+        player_transform.translation.y,
+    );
 
     if player.nova_interval > 0.0 {
         state.nova_timer -= delta;
@@ -1149,7 +1417,7 @@ fn nova_update(
                 let angle = std::f32::consts::TAU * i as f32 / 20.0;
                 commands.spawn((
                     Sprite::from_color(Color::srgb(0.95, 1.0, 0.98), Vec2::splat(0.55)),
-                    Transform::from_xyz(player_pos.x, 0.8, player_pos.y),
+                    Transform::from_xyz(player_pos.x, player_pos.y, 0.8),
                     Projectile {
                         dir: Vec2::from_angle(angle),
                         ttl: 2.0,
@@ -1202,4 +1470,18 @@ fn camera_follow(
     let player_transform = player_q.single().unwrap();
     camera.translation.x = player_transform.translation.x;
     camera.translation.y = player_transform.translation.y;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spawn_balance_stays_positive_across_levels() {
+        let config: RunConfig = load_json("data/balance/run_curves.json");
+        for level in 1..=20 {
+            assert!(spawn_interval(level, 120.0, &config) > 0.0);
+            assert!(spawn_batch(level, 120.0, &config) >= 1);
+        }
+    }
 }
